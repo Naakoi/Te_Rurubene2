@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 230, 40%, 6%;
+  --foreground: 210, 40%, 98%;
+
+  --card: 230, 40%, 10%;
+  --card-foreground: 210, 40%, 98%;
+
+  --popover: 230, 40%, 8%;
+  --popover-foreground: 210, 40%, 98%;
+
+  --primary: 190, 100%, 50%;
+  --primary-foreground: 230, 40%, 6%;
+
+  --secondary: 230, 40%, 14%;
+  --secondary-foreground: 210, 40%, 98%;
+
+  --muted: 230, 20%, 20%;
+  --muted-foreground: 215, 20%, 65%;
+
+  --accent: 280, 80%, 60%;
+  --accent-foreground: 210, 40%, 98%;
+
+  --border: 230, 40%, 15%;
+  --input: 230, 40%, 15%;
+  --ring: 190, 100%, 50%;
+
+  --radius: 1.25rem;
+}
+
+/* Force dark theme defaults */
+body {
+  background-color: hsl(230, 40%, 6%);
+  color: hsl(210, 40%, 98%);
+  margin: 0;
+  padding: 0;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-background/60 backdrop-blur-xl border border-white/10;
+  }
+  
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-2xl border border-white/10 shadow-2xl;
+  }
+
+  .mesh-gradient {
+    background-color: #0a0d14;
+    background-image: 
+      radial-gradient(at 0% 0%, hsla(190, 100%, 50%, 0.15) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(280, 80%, 60%, 0.15) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsla(190, 100%, 50%, 0.1) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsla(280, 80%, 60%, 0.1) 0px, transparent 50%);
+  }
+
+  .premium-glow {
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+  }
+
+  .media-grid {
+    @apply grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6;
+  }
+
+  /* Card — no scale on the full card, only the thumbnail zooms */
+  .media-card {
+    @apply glass-card p-3 pb-4 rounded-[var(--radius)] transition-all duration-300 relative flex flex-col;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .media-card:hover {
+    border-color: rgba(0, 255, 255, 0.2);
+    box-shadow: 0 0 0 1px rgba(0, 255, 255, 0.1), 0 20px 40px rgba(0,0,0,0.4);
+  }
+
+  /* The image container — this is what scales on hover */
+  .media-card-thumb {
+    @apply relative w-full overflow-hidden rounded-xl mb-3 bg-secondary;
+    aspect-ratio: 1 / 1;
+  }
+
+  .media-card:hover .media-card-thumb {
+    /* image inside scales, not the whole card */
+  }
+
+  .media-card-thumb img {
+    @apply w-full h-full object-cover transition-transform duration-700;
+  }
+
+  .media-card:hover .media-card-thumb img {
+    transform: scale(1.08);
+  }
+
+  /* Play overlay — sits on top of thumb only */
+  .media-card-thumb .play-overlay {
+    @apply absolute inset-0 flex items-center justify-center 
+           bg-black/40 opacity-0 transition-opacity duration-300;
+  }
+
+  .media-card:hover .media-card-thumb .play-overlay {
+    @apply opacity-100;
+  }
+
+  .media-card-title {
+    @apply font-bold text-[13px] leading-tight text-white truncate;
+  }
+
+  .media-card-artist {
+    @apply text-[11px] text-muted-foreground truncate block mt-0.5;
+  }
+
+  .fancy-button {
+    @apply relative overflow-hidden px-6 py-3 rounded-full font-bold transition-all duration-300 active:scale-95 bg-primary text-primary-foreground;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
