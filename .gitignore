@@ -1,0 +1,87 @@
+# ============================================================
+# ROOT LEVEL — Binaries & local tooling
+# ============================================================
+mc
+mc.1
+minio
+minio.1
+minio-data/
+minio.log
+startup.log
+*.log
+
+# ============================================================
+# BACKEND — Laravel (PHP)
+# ============================================================
+backend/.env
+backend/.env.*
+!backend/.env.example
+backend/vendor/
+backend/node_modules/
+backend/storage/logs/
+backend/storage/framework/cache/
+backend/storage/framework/sessions/
+backend/storage/framework/views/
+backend/storage/app/public/
+backend/bootstrap/cache/*.php
+backend/public/hot
+backend/public/storage
+backend/.phpunit.result.cache
+backend/laravel.log
+backend/insert_track.php
+backend/seed_samples.php
+backend/setup_kiribati_radio.php
+backend/setup_radio.php
+backend/populate_data.php
+backend/create_admin.php
+backend/update_tracks.php
+backend/reset_pass.php
+
+# ============================================================
+# FRONTEND — Next.js / Node
+# ============================================================
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/nextjs.log
+frontend/tsconfig.tsbuildinfo
+
+# ============================================================
+# MOBILE — Flutter / Dart
+# ============================================================
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/.pub-cache/
+mobile/.pub/
+mobile/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/key.properties
+mobile/android/app/google-services.json
+mobile/android/app/debug.keystore
+mobile/android/app/release.keystore
+mobile/ios/.symlinks/
+mobile/ios/Pods/
+mobile/ios/Flutter/Flutter.framework
+mobile/ios/Flutter/Flutter.podspec
+mobile/ios/Runner.xcworkspace/
+mobile/*.iml
+mobile/macos/Pods/
+mobile/web/
+
+# ============================================================
+# GENERAL
+# ============================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/settings.json
+*.orig

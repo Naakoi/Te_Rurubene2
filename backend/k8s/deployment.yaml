@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rurubene-api
+  labels:
+    app: rurubene
+    tier: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: rurubene
+  template:
+    metadata:
+      labels:
+        app: rurubene
+    spec:
+      containers:
+      - name: php
+        image: rurubene-app:latest
+        ports:
+        - containerPort: 9000
+        envFrom:
+        - secretRef:
+            name: rurubene-secrets
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rurubene-api-service
+spec:
+  selector:
+    app: rurubene
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 9000
+  type: LoadBalancer
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rurubene-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rurubene-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
