@@ -3,16 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, Compass, Library, ShoppingBag, Wallet } from "lucide-react";
+import { useAuthStore } from "@/store/authStore";
 
 export default function MobileNav() {
   const pathname = usePathname();
+  const { user } = useAuthStore();
 
   const navItems = [
     { href: "/", icon: <Home size={20} />, label: "Home" },
     { href: "/discover", icon: <Compass size={20} />, label: "Discover" },
-    { href: "/marketplace", icon: <ShoppingBag size={20} />, label: "Shop" },
-    { href: "/library", icon: <Library size={20} />, label: "Library" },
-    { href: "/wallet", icon: <Wallet size={20} />, label: "Wallet" },
+    ...(user ? [
+      { href: "/marketplace", icon: <ShoppingBag size={20} />, label: "Shop" },
+      { href: "/library", icon: <Library size={20} />, label: "Library" },
+      { href: "/wallet", icon: <Wallet size={20} />, label: "Wallet" },
+    ] : []),
   ];
 
   return (

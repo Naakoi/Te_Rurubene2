@@ -159,9 +159,13 @@ class CommerceController extends Controller
                 $request->items
             );
 
+            // Fetch actual platform fee from CreatorEarnings table for this purchase
+            $platformFee = $purchase->earnings()->where('recipient_type', 'platform')->sum('amount');
+
             return response()->json([
                 'message' => 'Checkout successful', 
                 'purchase' => $purchase,
+                'platform_fee' => (float)$platformFee,
                 'balance' => $user->wallet()->first()->balance
             ]);
         } catch (Exception $e) {

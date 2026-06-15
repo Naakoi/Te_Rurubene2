@@ -27,6 +27,7 @@ export default function CreatorOnboarding() {
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [country, setCountry] = useState('Kiribati');
   const [island, setIsland] = useState('');
+  const [walletPin, setWalletPin] = useState('');
 
   // Step 3 State
   const [artistName, setArtistName] = useState('');
@@ -37,6 +38,12 @@ export default function CreatorOnboarding() {
     e.preventDefault();
     if (password !== passwordConfirmation) {
       setErrorMessage('Passwords do not match');
+      setStatus('error');
+      return;
+    }
+    
+    if (!/^\d{4}$/.test(walletPin)) {
+      setErrorMessage('Wallet PIN must be exactly 4 digits');
       setStatus('error');
       return;
     }
@@ -51,7 +58,8 @@ export default function CreatorOnboarding() {
         password,
         password_confirmation: passwordConfirmation,
         country,
-        island
+        island,
+        wallet_pin: walletPin
       });
       
       localStorage.setItem('auth_token', response.data.token);
@@ -189,6 +197,22 @@ export default function CreatorOnboarding() {
                     <label className="text-sm font-medium text-white/80">Island / Region</label>
                     <input type="text" required value={island} onChange={e => setIsland(e.target.value)} className="w-full bg-background border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-primary transition" placeholder="e.g. Tarawa" />
                 </div>
+            </div>
+
+            <div className="space-y-2 border-t border-white/10 pt-6 mt-6">
+                <label className="text-sm font-medium text-[#00e5ff] flex items-center space-x-2">
+                    <span>Secure Wallet PIN (4 Digits)</span>
+                </label>
+                <p className="text-xs text-white/50 mb-2">You will need this PIN to open your Rurubene wallet and manage your funds.</p>
+                <input 
+                    type="password" 
+                    required 
+                    value={walletPin} 
+                    onChange={e => setWalletPin(e.target.value.replace(/\D/g, '').slice(0, 4))} 
+                    className="w-full max-w-[200px] bg-background border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-[#00e5ff] transition font-mono tracking-[0.5em] text-center text-xl" 
+                    placeholder="••••" 
+                    maxLength={4}
+                />
             </div>
 
             <button type="submit" disabled={status === 'loading'} className="w-full bg-primary hover:bg-primary-hover text-white font-bold py-4 rounded-xl transition flex items-center justify-center space-x-2 disabled:opacity-50">

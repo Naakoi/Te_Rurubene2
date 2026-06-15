@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Sparkles, TrendingUp, Music, User, Play, Search, Zap, Film, ShoppingCart, Library, Check } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
 import { useCartStore } from '@/store/cartStore';
+import OfflineView from '@/components/OfflineView';
 
 export default function DiscoverPage() {
   const [recommendations, setRecommendations] = useState<any[]>([]);
@@ -14,8 +15,22 @@ export default function DiscoverPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const { setCurrentMedia, playNext, addToQueue } = usePlayerStore();
   const { addItem } = useCartStore();
+
+  useEffect(() => {
+    // Connection tracking
+    const updateOnlineStatus = () => setIsOffline(!navigator.onLine);
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    updateOnlineStatus();
+
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+    };
+  }, []);
 
   const handleAddToCart = (track: any) => {
     addItem({
@@ -57,6 +72,8 @@ export default function DiscoverPage() {
   };
 
   useEffect(() => {
+    if (isOffline) return;
+
     // Public Content
     api.get('/api/videos')
         .then(res => setVideos(res.data))
@@ -77,7 +94,7 @@ export default function DiscoverPage() {
           api.get('/api/tracks').then(r => setRecommendations(r.data)).catch(() => {});
         })
         .finally(() => setLoading(false));
-  }, []);
+  }, [isOffline]);
   const handleSmartPlaylist = (mood: string) => {
     api.post('/api/smart-playlist', { mood })
       .then(res => {
@@ -95,6 +112,10 @@ export default function DiscoverPage() {
           }
       });
   };
+
+  if (isOffline) {
+    return <OfflineView pageName="AI Discover" description="AI Recommendations, smart playlists, and video channels require an active internet connection. You can still listen to your downloaded music in your library." />;
+  }
 
   return (
     <div className="p-8">

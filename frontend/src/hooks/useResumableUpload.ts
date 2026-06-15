@@ -33,22 +33,73 @@ export function useResumableUpload() {
       partsRef.current = [];
       currentChunkIndexRef.current = 0;
 
-      // 1. Init
-      const { data: initData } = await api.post('/api/upload/multipart/init', {
-        file_name: options.file.name,
-        media_type: options.mediaType,
-        file_type: options.file.type,
-        is_premium: options.isPremium,
-        price: options.price
-      });
+      // 1. Init — check if R2 is configured on the server
+      let initResponse;
+      try {
+        initResponse = await api.post('/api/upload/multipart/init', {
+          file_name: options.file.name,
+          media_type: options.mediaType,
+          file_type: options.file.type,
+          is_premium: options.isPremium,
+          price: options.price
+        });
+      } catch (err: any) {
+        // If server returns 503 with fallback:true, R2 is not configured.
+        // Fall back to the direct upload endpoint (StudioController).
+        if (err.response?.status === 503 && err.response?.data?.fallback) {
+          await directUploadFallback(options);
+          return;
+        }
+        throw err;
+      }
 
-      uploadIdRef.current = initData.upload_id;
-      keyRef.current = initData.key;
+      uploadIdRef.current = initResponse.data.upload_id;
+      keyRef.current = initResponse.data.key;
 
       await processChunks();
     } catch (err: any) {
       handleError(err);
     }
+  };
+
+  /** Direct multipart/form-data upload to the old StudioController endpoint. */
+  const directUploadFallback = (options: UploadOptions): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const formData = new FormData();
+      formData.append('file', options.file);
+      formData.append('title', options.title);
+      formData.append('media_type', options.mediaType);
+      formData.append('is_premium', options.isPremium ? '1' : '0');
+      formData.append('price', options.price);
+
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : '';
+      const xhr = new XMLHttpRequest();
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          setProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      });
+
+      xhr.onload = () => {
+        if (xhr.status === 200 || xhr.status === 201) {
+          setStatus('success');
+          setProgress(100);
+          resolve();
+        } else {
+          let msg = 'Upload failed';
+          try { msg = JSON.parse(xhr.responseText)?.message || msg; } catch {}
+          reject(new Error(msg));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Network error during upload'));
+
+      xhr.open('POST', '/api/studio/upload');
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.send(formData);
+    });
   };
 
   const processChunks = async () => {

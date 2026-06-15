@@ -16,7 +16,10 @@ class AuthController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
             'password' => 'required|string|min:8|confirmed',
-            'role' => 'sometimes|string|in:admin,studio,artist,client'
+            'role' => 'sometimes|string|in:admin,studio,artist,client',
+            'wallet_pin' => 'required|string|size:4|regex:/^[0-9]+$/',
+            'security_question' => 'required|string|max:255',
+            'security_answer' => 'required|string|max:255',
         ]);
 
         $user = User::create([
@@ -24,6 +27,10 @@ class AuthController extends Controller
             'email' => $request->email,
             'password' => Hash::make($request->password),
             'role' => $request->role ?? 'client',
+            'wallet_pin' => Hash::make($request->wallet_pin),
+            'security_question' => $request->security_question,
+            // Convert to lowercase before hashing so validation is case-insensitive later
+            'security_answer' => Hash::make(strtolower(trim($request->security_answer))),
         ]);
 
         // Create empty profile
@@ -80,5 +87,27 @@ class AuthController extends Controller
         return response()->json([
             'user' => $request->user()->load(['profile', 'artist', 'studio'])
         ]);
+    }
+
+    public function changePassword(Request $request)
+    {
+        $request->validate([
+            'current_password' => 'required|string',
+            'new_password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $user = $request->user();
+
+        if (!\Illuminate\Support\Facades\Hash::check($request->current_password, $user->password)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'current_password' => ['The provided password does not match your current password.'],
+            ]);
+        }
+
+        $user->update([
+            'password' => \Illuminate\Support\Facades\Hash::make($request->new_password)
+        ]);
+
+        return response()->json(['message' => 'Password updated successfully.']);
     }
 }

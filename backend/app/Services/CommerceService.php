@@ -219,6 +219,20 @@ class CommerceService
                 ]);
             }
 
+            // Notify the user of the successful top-up
+            $sourceLabel = match ($source) {
+                'stripe'    => 'Visa/Mastercard (Stripe)',
+                'paypal'    => 'PayPal',
+                'bank_deposit' => 'Bank Deposit',
+                default     => ucfirst($source),
+            };
+
+            $user->notifications()->create([
+                'type'    => 'transaction',
+                'title'   => 'Wallet Top-up Successful',
+                'message' => 'Your wallet has been credited with $' . number_format($amount, 2) . ' AUD via ' . $sourceLabel . '. Your new balance is ready to use.',
+            ]);
+
             return true;
         });
     }

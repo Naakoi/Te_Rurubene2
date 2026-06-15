@@ -23,6 +23,9 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'wallet_pin',
+        'security_question',
+        'security_answer',
         'language',
         'dark_mode',
     ];
@@ -35,6 +38,8 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'wallet_pin',
+        'security_answer',
     ];
 
     /**
@@ -75,7 +80,12 @@ class User extends Authenticatable
 
     public function wallet()
     {
-        return $this->hasOne(Wallet::class);
+        return $this->hasOne(Wallet::class)->latestOfMany();
+    }
+
+    public function notifications()
+    {
+        return $this->hasMany(Notification::class);
     }
 
     public function getIsSubscribedAttribute()

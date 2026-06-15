@@ -4,20 +4,37 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Store, ArrowRight, User } from 'lucide-react';
 import api from '@/lib/axios';
+import OfflineView from '@/components/OfflineView';
 
 export default function StoresPage() {
   const [stores, setStores] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('name');
 
   useEffect(() => {
+    // Connection tracking
+    const updateOnlineStatus = () => setIsOffline(!navigator.onLine);
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    updateOnlineStatus();
+
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isOffline) return;
+
     api.get('/api/stores')
       .then(res => setStores(res.data))
       .catch(err => console.error('Failed to fetch stores', err))
       .finally(() => setLoading(false));
-  }, []);
+  }, [isOffline]);
 
   const filteredStores = stores
     .filter(store => 
@@ -33,6 +50,10 @@ export default function StoresPage() {
       }
       return 0;
     });
+
+  if (isOffline) {
+    return <OfflineView pageName="Public Stores" description="Public stores and creator merchandise require an active internet connection. You can still listen to your downloaded music in your library." />;
+  }
 
   return (
     <div className="p-8">

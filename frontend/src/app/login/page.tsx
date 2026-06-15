@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import api from '@/lib/axios';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
@@ -8,6 +9,7 @@ import { useAuthStore } from '@/store/authStore';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
@@ -72,14 +74,25 @@ export default function LoginPage() {
           
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-2">Password</label>
-            <input 
-              type="password" 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3.5 focus:border-primary outline-none transition-all duration-300 text-white placeholder:text-white/20"
-              placeholder="••••••••"
-              required
-            />
+            <div className="relative">
+              <input 
+                type={showPassword ? 'text' : 'password'} 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3.5 pr-12 focus:border-primary outline-none transition-all duration-300 text-white placeholder:text-white/20"
+                placeholder="••••••••"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white transition-colors duration-200"
+                tabIndex={-1}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
 
           <button 
@@ -95,13 +108,21 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-12 text-center border-t border-white/5 pt-8">
-          <p className="text-sm text-muted-foreground mb-6 font-medium">Are you a musician looking to share your art?</p>
-          <button 
-            onClick={() => router.push('/creator/join')}
-            className="w-full py-3 bg-white/5 hover:bg-white/10 text-white border border-white/10 font-bold rounded-2xl transition-all duration-300"
-          >
-            BECOME A CREATOR
-          </button>
+          <p className="text-sm text-muted-foreground mb-4 font-medium">New to Te Rurubene?</p>
+          <div className="flex flex-col space-y-3">
+            <button 
+              onClick={() => router.push('/register')}
+              className="w-full py-3 bg-[#00e5ff]/10 hover:bg-[#00e5ff]/20 text-[#00e5ff] border border-[#00e5ff]/30 font-bold rounded-2xl transition-all duration-300"
+            >
+              SIGN UP AS LISTENER
+            </button>
+            <button 
+              onClick={() => router.push('/creator/join')}
+              className="w-full py-3 bg-white/5 hover:bg-white/10 text-white border border-white/10 font-bold rounded-2xl transition-all duration-300"
+            >
+              BECOME A CREATOR
+            </button>
+          </div>
         </div>
       </div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-primary/10 blur-[150px] rounded-full"></div>

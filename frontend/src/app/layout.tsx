@@ -15,6 +15,20 @@ const outfit = Outfit({
 export const metadata = {
   title: "Te Rurubene – Pacific Music Ecosystem",
   description: "Discover, stream, and support Pacific Island artists.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Te Rurubene",
+  },
+};
+
+export const viewport = {
+  themeColor: "#0a0d14",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({

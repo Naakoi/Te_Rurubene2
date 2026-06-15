@@ -107,4 +107,50 @@ class TrackController extends Controller
         
         return response()->json($tracks);
     }
+
+    /**
+     * Proxy cross-origin media files to bypass CORS.
+     */
+    public function proxyMedia(Request $request)
+    {
+        $url = $request->query('url');
+        if (!$url) {
+            return response()->json(['error' => 'URL query parameter is required'], 400);
+        }
+
+        // Validate the URL is http/https
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            return response()->json(['error' => 'Invalid URL format'], 400);
+        }
+
+        try {
+            $client = new \GuzzleHttp\Client([
+                'timeout' => 60,
+                'verify' => false,
+            ]);
+            $response = $client->request('GET', $url, [
+                'stream' => true,
+            ]);
+
+            $headers = [
+                'Content-Type' => $response->getHeaderLine('Content-Type') ?: 'audio/mpeg',
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Headers' => 'Range',
+                'Access-Control-Expose-Headers' => 'Content-Length, Content-Range',
+            ];
+
+            if ($response->hasHeader('Content-Length')) {
+                $headers['Content-Length'] = $response->getHeaderLine('Content-Length');
+            }
+
+            return response()->stream(function () use ($response) {
+                $body = $response->getBody();
+                while (!$body->eof()) {
+                    echo $body->read(8192);
+                }
+            }, $response->getStatusCode(), $headers);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to proxy media: ' . $e->getMessage()], 500);
+        }
+    }
 }

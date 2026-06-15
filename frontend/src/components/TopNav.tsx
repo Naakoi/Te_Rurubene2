@@ -6,20 +6,59 @@ import { useUIStore } from '@/store/uiStore';
 import { useEffect, useState } from 'react';
 import api from '@/lib/axios';
 import { ShoppingCart, Menu } from 'lucide-react';
+import Link from 'next/link';
+import NotificationDropdown from './NotificationDropdown';
 
 export default function TopNav() {
   const { user } = useAuthStore();
   const { items, toggleCart } = useCartStore();
   const { toggleSidebar } = useUIStore();
   const [balance, setBalance] = useState(0);
+  const [isOffline, setIsOffline] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   useEffect(() => {
-    if (user) {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    if (typeof window !== 'undefined') {
+      setIsOffline(!navigator.onLine);
+      
+      const handleOnline = () => setIsOffline(false);
+      const handleOffline = () => setIsOffline(true);
+      
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      
+      return () => {
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      };
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user && !isOffline) {
       api.get('/api/wallet')
         .then(res => setBalance(res.data.balance))
         .catch(() => {});
     }
-  }, [user]);
+  }, [user, isOffline]);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    }
+  };
 
   if (!user) return null;
 
@@ -41,15 +80,28 @@ export default function TopNav() {
                <span className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground mt-1 opacity-60 group-hover:opacity-100 transition-opacity">Digital Pacific</span>
            </div>
        </div>
-       <div className="flex items-center justify-end w-full space-x-3 md:space-x-6">
-          <div className="bg-white/5 border border-white/10 px-5 py-2 rounded-2xl flex items-center space-x-3 shadow-[inner_0_2px_4px_rgba(0,0,0,0.3)] hover:bg-white/10 transition-all duration-300 cursor-pointer group">
+       <div className="flex items-center justify-end w-full space-x-3 md:space-x-4">
+          {deferredPrompt && (
+            <button onClick={handleInstallClick} className="bg-primary/20 text-primary border border-primary/30 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl flex items-center space-x-2 hover:bg-primary/40 transition-all font-bold text-[10px] md:text-xs uppercase tracking-widest shadow-[0_0_10px_rgba(0,255,255,0.2)] hidden sm:flex">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span>Install</span>
+            </button>
+          )}
+          {isOffline && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-500 px-3 md:px-4 py-1.5 md:py-2 rounded-2xl flex items-center space-x-2 shadow-[0_0_15px_rgba(239,68,68,0.1)]">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+              <span className="text-[10px] font-black uppercase tracking-widest">Offline</span>
+            </div>
+          )}
+          <Link href="/wallet" className="bg-white/5 border border-white/10 px-5 py-2 rounded-2xl flex items-center space-x-3 shadow-[inner_0_2px_4px_rgba(0,0,0,0.3)] hover:bg-white/10 transition-all duration-300 cursor-pointer group">
              <div className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_8px_rgba(0,255,255,0.8)]"></div>
              <div className="flex flex-col">
                 <span className="text-[10px] text-muted-foreground/60 font-bold uppercase tracking-widest">Balance</span>
                 <span className="text-sm font-black text-white group-hover:text-primary transition-colors">${Number(balance).toFixed(2)}</span>
              </div>
-          </div>
-          <button 
+          </Link>
+          <NotificationDropdown />
+          <button
             onClick={toggleCart}
             className="p-3 bg-white/5 border border-white/10 rounded-2xl hover:bg-primary hover:text-primary-foreground transition-all duration-500 relative shadow-xl group hover:-translate-y-0.5 active:translate-y-0"
           >
@@ -70,8 +122,10 @@ export default function TopNav() {
              <div className="flex flex-col hidden md:flex">
                  <span className="font-bold text-sm text-white group-hover:text-primary transition-colors">{user?.name || 'User'}</span>
                  <div className="flex items-center space-x-1.5 mt-0.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">{user.role}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${isOffline ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></span>
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">
+                      {isOffline ? 'Offline' : user.role}
+                    </span>
                  </div>
              </div>
           </div>

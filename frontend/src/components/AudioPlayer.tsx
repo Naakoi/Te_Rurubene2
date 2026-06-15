@@ -6,7 +6,8 @@ import { usePlayerStore } from '@/store/playerStore';
 import { useCartStore } from '@/store/cartStore';
 import {
   Play, Pause, SkipForward, SkipBack, Volume2, VolumeX,
-  Maximize2, Minimize2, X, Music2, Film, Loader2, ListMusic, Trash2, PictureInPicture, Zap
+  Maximize2, Minimize2, X, Music2, Film, Loader2, ListMusic, Trash2, PictureInPicture, Zap,
+  Sliders, Shuffle, Repeat, Clock
 } from 'lucide-react';
 import type Hls from 'hls.js';
 import Link from 'next/link';
@@ -20,6 +21,7 @@ export default function UnifiedMediaPlayer() {
   const HlsRef = useRef<typeof Hls | null>(null);
 
   const [progress, setProgress] = useState(0);
+  const [bufferedProgress, setBufferedProgress] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -34,6 +36,211 @@ export default function UnifiedMediaPlayer() {
   const [showPurchasePrompt, setShowPurchasePrompt] = useState(false);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Advanced Player States ──
+  const [showEQ, setShowEQ] = useState(false);
+  const [eqBands, setEqBands] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const [eqPreset, setEqPreset] = useState<string>('Flat');
+  const [repeatMode, setRepeatMode] = useState<'off' | 'all' | 'one'>('off');
+  const [shuffle, setShuffle] = useState<boolean>(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [sleepTimeRemaining, setSleepTimeRemaining] = useState<number | null>(null);
+  const [showSleepMenu, setShowSleepMenu] = useState(false);
+  const [corsFailed, setCorsFailed] = useState(false);
+
+  // ── Web Audio API Refs ──
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const filtersRef = useRef<BiquadFilterNode[]>([]);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+
+  // ── Fake Canvas Visualizer ──
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  // Setup/Resume Audio Context for Equalizer and Visualizer
+  const setupAudioContext = useCallback(() => {
+    if (audioCtxRef.current || corsFailed) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      
+      const ctx = new AudioContextClass();
+      audioCtxRef.current = ctx;
+
+      // 10 bands: 31Hz, 62Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz
+      const frequencies = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+      const filters = frequencies.map((freq, index) => {
+        const filter = ctx.createBiquadFilter();
+        filter.type = index === 0 ? 'lowshelf' : index === frequencies.length - 1 ? 'highshelf' : 'peaking';
+        filter.frequency.value = freq;
+        filter.Q.value = 1.0;
+        filter.gain.value = eqBands[index] || 0;
+        return filter;
+      });
+
+      // Connect source -> filters -> destination
+      const source = ctx.createMediaElementSource(video);
+      sourceRef.current = source;
+
+      let lastNode: AudioNode = source;
+      filters.forEach(filter => {
+        lastNode.connect(filter);
+        lastNode = filter;
+      });
+
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      lastNode.connect(analyser);
+      analyserRef.current = analyser;
+
+      analyser.connect(ctx.destination);
+      filtersRef.current = filters;
+    } catch (e) {
+      console.warn("Web Audio API / Equalizer not supported or failed to init (CORS block or browser restriction):", e);
+    }
+  }, [eqBands, corsFailed]);
+
+  // Adjust bands manually
+  const handleBandChange = (index: number, value: number) => {
+    const newBands = [...eqBands];
+    newBands[index] = value;
+    setEqBands(newBands);
+    setEqPreset('Manual');
+
+    if (filtersRef.current[index]) {
+      filtersRef.current[index].gain.value = value;
+    }
+  };
+
+  // Preset Applier
+  const applyPreset = (presetName: string) => {
+    setEqPreset(presetName);
+    let bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    switch (presetName) {
+      case 'Bass Boost': bands = [6, 5, 4, 2, 0, 0, 0, 0, 0, 0]; break;
+      case 'Vocal Boost': bands = [-2, -2, -1, 0, 2, 4, 4, 3, 1, -1]; break;
+      case 'Treble Boost': bands = [-2, -2, -2, -1, 0, 1, 3, 5, 6, 6]; break;
+      case 'Podcast': bands = [-4, -3, -2, 1, 3, 4, 4, 3, 1, -2]; break;
+      case 'Acoustic': bands = [2, 1, 1, 0, 1, 2, 3, 3, 2, 1]; break;
+      case 'Electronic': bands = [4, 3, 0, -1, -2, 0, 2, 3, 4, 5]; break;
+      case 'Pop': bands = [-1, 2, 3, 4, 2, -1, -2, -2, -1, -1]; break;
+      case 'Rock': bands = [4, 3, -1, -2, -1, 1, 3, 4, 4, 4]; break;
+      default: bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; break; // Flat
+    }
+    setEqBands(bands);
+    filtersRef.current.forEach((filter, idx) => {
+      if (filter) filter.gain.value = bands[idx];
+    });
+  };
+
+  // Drive visualizer canvas with real audio frequency data or smooth fake visualizer fallback
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const barCount = 32;
+    const currentHeights = new Float32Array(barCount);
+    const targetHeights = new Float32Array(barCount);
+    let lastUpdate = 0;
+
+    const draw = (timestamp: number) => {
+      const ctx2d = canvas.getContext('2d');
+      if (!ctx2d) return;
+      const W = canvas.width;
+      const H = canvas.height;
+      ctx2d.clearRect(0, 0, W, H);
+
+      if (!isPlaying) {
+        // Draw flat idle bars when paused
+        const barW = Math.floor(W / barCount) - 2;
+        ctx2d.fillStyle = 'rgba(0,229,255,0.25)';
+        for (let i = 0; i < barCount; i++) {
+          const x = i * (barW + 2);
+          ctx2d.beginPath();
+          ctx2d.roundRect(x, H - 4, barW, 4, 2);
+          ctx2d.fill();
+        }
+        return;
+      }
+
+      // Draw real visualizer bars if AnalyserNode is active and successfully receiving data
+      if (analyserRef.current) {
+        const bufferLength = analyserRef.current.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        analyserRef.current.getByteFrequencyData(dataArray);
+
+        // Check if analyser actually has signals (not all zeroes, which happens if CORS restricts source)
+        const hasSignal = dataArray.some(val => val > 0);
+
+        if (hasSignal) {
+          const barW = Math.floor(W / barCount) - 2;
+          for (let i = 0; i < barCount; i++) {
+            const dataIdx = Math.floor((i / barCount) * bufferLength);
+            const percent = dataArray[dataIdx] / 255;
+            const barH = Math.max(4, percent * H * 0.95);
+            
+            const x = i * (barW + 2);
+            const y = H - barH;
+
+            const grad = ctx2d.createLinearGradient(0, y, 0, H);
+            grad.addColorStop(0, `rgba(180,100,255,${0.6 + (barH/H)*0.4})`);
+            grad.addColorStop(1, `rgba(0,229,255,${0.9 + (barH/H)*0.1})`);
+            ctx2d.fillStyle = grad;
+
+            ctx2d.beginPath();
+            ctx2d.roundRect(x, y, barW, barH, [3, 3, 0, 0]);
+            ctx2d.fill();
+          }
+          rafRef.current = requestAnimationFrame(draw);
+          return;
+        }
+      }
+
+      // Fallback: Generate new targets periodically for fake visualizer
+      if (timestamp - lastUpdate > 100) {
+        lastUpdate = timestamp;
+        for (let i = 0; i < barCount; i++) {
+            const distanceToCenter = Math.abs((barCount / 2) - i) / (barCount / 2);
+            const maxVolumeForBar = 1 - (distanceToCenter * 0.5);
+            const randomPulse = Math.random() * maxVolumeForBar;
+            targetHeights[i] = Math.max(4, randomPulse * H * 0.8);
+        }
+      }
+
+      const barW = Math.floor(W / barCount) - 2;
+
+      for (let i = 0; i < barCount; i++) {
+        currentHeights[i] += (targetHeights[i] - currentHeights[i]) * 0.2;
+        const barH = currentHeights[i];
+        
+        const x = i * (barW + 2);
+        const y = H - barH;
+
+        const grad = ctx2d.createLinearGradient(0, y, 0, H);
+        grad.addColorStop(0, `rgba(180,100,255,${0.6 + (barH/H)*0.4})`);
+        grad.addColorStop(1, `rgba(0,229,255,${0.9 + (barH/H)*0.1})`);
+        ctx2d.fillStyle = grad;
+
+        ctx2d.beginPath();
+        ctx2d.roundRect(x, y, barW, barH, [3, 3, 0, 0]);
+        ctx2d.fill();
+      }
+
+      rafRef.current = requestAnimationFrame(draw);
+    };
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(draw);
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [isPlaying]);
 
   const fmt = (s: number) => {
     if (!s || isNaN(s)) return '0:00';
@@ -72,36 +279,161 @@ export default function UnifiedMediaPlayer() {
     setIsLoading(true);
     setResolvedUrl(null);
 
-    const url = currentMedia.stream_url;
-    if (url.endsWith('.m3u8') || url.includes('.mp3') || url.includes('.mp4')) {
-      setResolvedUrl(url);
-      setIsLoading(false);
-      return;
-    }
+    const loadMedia = async () => {
+      let url = currentMedia.stream_url;
 
-    fetch(url, {
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('auth_token') : ''}`
+      // 1. Try to load from secure offline storage first (client-side only)
+      if (typeof window !== 'undefined') {
+        try {
+          const { isTrackOffline, getOfflineTrackBlobUrl, makeUrlRelative } = await import('@/lib/offlineStorage');
+          
+          // Clean the url to be relative to avoid CORS and port mismatches
+          url = makeUrlRelative(url);
+
+          const isOffline = await isTrackOffline(currentMedia.id);
+          if (isOffline) {
+            const blobUrl = await getOfflineTrackBlobUrl(currentMedia.id);
+            if (blobUrl) {
+              setResolvedUrl(blobUrl);
+              setIsLoading(false);
+              return; // Successfully loaded from offline, skip network
+            }
+          }
+        } catch(e) {
+          console.error('Failed to load offline track', e);
+        }
       }
-    })
-      .then(r => r.json())
-      .then(data => {
-        setResolvedUrl(data.stream_url || url);
-      })
-      .catch(() => setResolvedUrl(url))
-      .finally(() => setIsLoading(false));
 
-    // Track history when media starts playing (only for authenticated users)
-    if (typeof window !== 'undefined' && localStorage.getItem('auth_token')) {
-      api.post('/api/player/history/add', {
-        media_type: currentMedia.type,
-        media_id: currentMedia.id
-      }).catch(err => console.error('Failed to track history', err));
-    }
+      // 2. Prevent network attempt if user is actually offline
+      if (!navigator.onLine) {
+        alert("You are offline. Please download this track to play it without internet.");
+        setIsLoading(false);
+        return;
+      }
+
+      // 3. Network fetch
+      if (url.endsWith('.m3u8') || url.includes('.mp3') || url.includes('.mp4')) {
+        setResolvedUrl(url);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('auth_token') : ''}`
+          }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            // Use makeUrlRelative for the resolved stream url as well
+            const { makeUrlRelative } = await import('@/lib/offlineStorage');
+            setResolvedUrl(makeUrlRelative(data.stream_url || url));
+        } else {
+            setResolvedUrl(url);
+        }
+      } catch (err) {
+        setResolvedUrl(url);
+      } finally {
+        setIsLoading(false);
+      }
+
+      // Track history when media starts playing (only for authenticated users)
+      if (typeof window !== 'undefined' && localStorage.getItem('auth_token')) {
+        api.post('/api/player/history/add', {
+          media_type: currentMedia.type,
+          media_id: currentMedia.id
+        }).catch(err => console.error('Failed to track history', err));
+      }
+    };
+
+    loadMedia();
     
   }, [currentMedia]);
 
+  // Reset CORS fallback flag on new track load
+  useEffect(() => {
+    setCorsFailed(false);
+  }, [currentMedia]);
+
+  // Sync playback speed
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = playbackSpeed;
+    }
+  }, [playbackSpeed, resolvedUrl]);
+
+  // Sleep Timer countdown logic
+  useEffect(() => {
+    if (sleepTimeRemaining === null) return;
+    if (sleepTimeRemaining <= 0) {
+      setIsPlaying(false);
+      if (videoRef.current) videoRef.current.pause();
+      setSleepTimeRemaining(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (isPlaying) {
+        setSleepTimeRemaining(prev => (prev !== null ? prev - 1 : null));
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [sleepTimeRemaining, isPlaying, setIsPlaying]);
+
+  // Keyboard Shortcuts (Space: play/pause, Arrow Keys: seek/volume, M: mute)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      if (activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.hasAttribute('contenteditable')
+      )) {
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case ' ':
+          e.preventDefault();
+          setIsPlaying(!isPlaying);
+          break;
+        case 'arrowleft':
+          e.preventDefault();
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 5);
+          }
+          break;
+        case 'arrowright':
+          e.preventDefault();
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 5);
+          }
+          break;
+        case 'arrowup':
+          e.preventDefault();
+          setVolume(prev => Math.min(1, prev + 0.05));
+          setMuted(false);
+          break;
+        case 'arrowdown':
+          e.preventDefault();
+          setVolume(prev => Math.max(0, prev - 0.05));
+          setMuted(false);
+          break;
+        case 'm':
+          e.preventDefault();
+          setMuted(!muted);
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlaying, duration, muted, setIsPlaying]);
+
+  // HLS and Media URL Loader
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !resolvedUrl) return;
@@ -109,6 +441,13 @@ export default function UnifiedMediaPlayer() {
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
+    }
+
+    // Set crossOrigin flag if not bypassed by CORS failure
+    if (!corsFailed) {
+      video.crossOrigin = "anonymous";
+    } else {
+      video.removeAttribute('crossorigin');
     }
 
     const loadHls = async () => {
@@ -120,7 +459,12 @@ export default function UnifiedMediaPlayer() {
         hls.loadSource(resolvedUrl);
         hls.attachMedia(video);
         hls.on(HlsModule.Events.MANIFEST_PARSED, () => {
-          if (isPlaying) video.play().catch(() => {});
+          if (isPlaying) {
+            video.play().catch(() => {});
+          }
+          if (!corsFailed) {
+            setupAudioContext();
+          }
         });
         hls.on(HlsModule.Events.ERROR, (_, data) => {
           if (data.fatal) console.error('HLS fatal error:', data);
@@ -129,23 +473,35 @@ export default function UnifiedMediaPlayer() {
       } else {
         // Fallback for native Safari HLS and simple audio files (.mp3, .mp4)
         video.src = resolvedUrl;
-        if (isPlaying) video.play().catch(() => {});
+        if (isPlaying) {
+          video.play().then(() => {
+            if (!corsFailed) {
+              setupAudioContext();
+            }
+          }).catch(() => {});
+        }
       }
     };
 
     loadHls();
-  }, [resolvedUrl]);
+  }, [resolvedUrl, corsFailed, setupAudioContext]);
 
+  // Play / Pause handling
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !resolvedUrl) return;
     if (isPlaying) {
-      video.play().catch(() => {});
+      video.play().then(() => {
+        if (!corsFailed) {
+          setupAudioContext();
+        }
+      }).catch(() => {});
     } else {
       video.pause();
     }
-  }, [isPlaying]);
+  }, [isPlaying, resolvedUrl, corsFailed, setupAudioContext]);
 
+  // Volume & Mute handling
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = volume;
@@ -178,6 +534,20 @@ export default function UnifiedMediaPlayer() {
     setCurrentTime(time);
     setDuration(v.duration || 0);
     setProgress(v.duration ? (time / v.duration) * 100 : 0);
+
+    // Update buffered progress range
+    if (v.buffered && v.buffered.length > 0 && v.duration) {
+      let currentBufferEnd = 0;
+      for (let i = 0; i < v.buffered.length; i++) {
+        if (v.buffered.start(i) <= time && time <= v.buffered.end(i)) {
+          currentBufferEnd = v.buffered.end(i);
+          break;
+        }
+      }
+      setBufferedProgress((currentBufferEnd / v.duration) * 100);
+    } else {
+      setBufferedProgress(0);
+    }
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -264,6 +634,65 @@ export default function UnifiedMediaPlayer() {
     }, 3000);
   }, [isPlaying]);
 
+  // Handle track ending — respects repeat & shuffle modes
+  const handleEnded = useCallback(() => {
+    if (repeatMode === 'one') {
+      // Replay current track from beginning
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+        videoRef.current.play().catch(() => {});
+      }
+    } else if (shuffle) {
+      // Jump to a random track in the queue (excluding current)
+      const currentIndex = queue.findIndex(
+        (item) => item.id === currentMedia?.id && item.type === currentMedia?.type
+      );
+      const others = queue.filter((_, i) => i !== currentIndex);
+      if (others.length > 0) {
+        const randomItem = others[Math.floor(Math.random() * others.length)];
+        setCurrentMedia(randomItem);
+      } else {
+        nextMedia();
+      }
+    } else {
+      nextMedia();
+    }
+  }, [repeatMode, shuffle, queue, currentMedia, nextMedia, setCurrentMedia]);
+
+  // Prev with shuffle awareness
+  const handlePrev = useCallback(() => {
+    if (shuffle) {
+      const currentIndex = queue.findIndex(
+        (item) => item.id === currentMedia?.id && item.type === currentMedia?.type
+      );
+      const others = queue.filter((_, i) => i !== currentIndex);
+      if (others.length > 0) {
+        const randomItem = others[Math.floor(Math.random() * others.length)];
+        setCurrentMedia(randomItem);
+        return;
+      }
+    }
+    prevMedia();
+  }, [shuffle, queue, currentMedia, prevMedia, setCurrentMedia]);
+
+  // Next with shuffle awareness
+  const handleNext = useCallback(() => {
+    if (shuffle) {
+      const currentIndex = queue.findIndex(
+        (item) => item.id === currentMedia?.id && item.type === currentMedia?.type
+      );
+      const others = queue.filter((_, i) => i !== currentIndex);
+      if (others.length > 0) {
+        const randomItem = others[Math.floor(Math.random() * others.length)];
+        setCurrentMedia(randomItem);
+        return;
+      }
+    }
+    nextMedia();
+  }, [shuffle, queue, currentMedia, nextMedia, setCurrentMedia]);
+
+
+
   if (!currentMedia) {
     return null; // Hide the player completely when empty for a clean top-level layout
   }
@@ -338,11 +767,70 @@ export default function UnifiedMediaPlayer() {
         onClick={() => { if (isVideo && !isFullscreen) setIsPlaying(!isPlaying); }}
         onDoubleClick={() => { if (isVideo && !isFullscreen) toggleFullscreen(); }}
         onTimeUpdate={handleTimeUpdate}
-        onEnded={nextMedia}
+        onEnded={handleEnded}
+        onError={() => {
+          const video = videoRef.current;
+          if (video && video.crossOrigin === "anonymous") {
+            console.warn("CORS issue detected with AudioContext setup. Falling back to simple mode.");
+            setCorsFailed(true);
+            // Reload track without crossOrigin
+            video.removeAttribute('crossorigin');
+            video.load();
+            if (isPlaying) {
+              video.play().catch(() => {});
+            }
+          }
+        }}
         onWaiting={() => setIsLoading(true)}
-        onCanPlay={() => setIsLoading(false)}
+        onCanPlay={() => {
+          setIsLoading(false);
+          if (videoRef.current) {
+            videoRef.current.playbackRate = playbackSpeed;
+          }
+        }}
         playsInline
       />
+
+      {/* ── Audio Cover Image & Visualizer ── */}
+      {!isVideo && (
+        <div className="w-full aspect-video max-h-[25vh] lg:max-h-[35vh] bg-black relative flex items-center justify-center overflow-hidden border-b border-white/5">
+           {currentMedia.cover_url ? (
+             <>
+               <div 
+                 className="absolute inset-0 bg-cover bg-center blur-2xl opacity-40 scale-110" 
+                 style={{ backgroundImage: `url(${currentMedia.cover_url})` }} 
+               />
+               {/* Spinning Vinyl Record Visual */}
+               <div className="relative h-[80%] aspect-square flex items-center justify-center z-10">
+                 <img 
+                   src={currentMedia.cover_url} 
+                   className={`h-full aspect-square object-cover shadow-2xl transition-transform duration-[20s] ${
+                     isPlaying ? 'animate-[spin_20s_linear_infinite]' : ''
+                   } rounded-full border-4 border-black/40 ring-8 ring-white/5`} 
+                 />
+                 {/* Vinyl center hole spacer */}
+                 <div className="absolute w-6 h-6 rounded-full bg-black/80 border border-white/10 z-20 flex items-center justify-center">
+                   <div className="w-2 h-2 rounded-full bg-background" />
+                 </div>
+               </div>
+             </>
+           ) : (
+             <div className="w-full h-full bg-gradient-to-br from-primary/20 to-blue-900/20 flex items-center justify-center">
+                <Music2 size={64} className={`text-white/20 ${isPlaying ? 'animate-pulse' : ''}`} />
+             </div>
+           )}
+           
+           {/* Web Audio API Visualizer */}
+           <div className="absolute inset-0 z-20 flex items-end justify-center pointer-events-none bg-gradient-to-t from-black/60 via-transparent to-transparent">
+              <canvas
+                ref={canvasRef}
+                width={600}
+                height={80}
+                className="w-full h-20 opacity-90"
+              />
+           </div>
+        </div>
+      )}
 
       {/* Inline Loader (for Video) */}
       {isVideo && !isFullscreen && !isPip && isLoading && (
@@ -463,72 +951,104 @@ export default function UnifiedMediaPlayer() {
       )}
 
       {/* ── Global Player Bar (Professional Layout) ── */}
-      <div className={`h-24 px-4 md:px-8 select-none flex items-center justify-between ${isFullscreen ? 'hidden' : ''}`}>
+      <div className={`h-24 px-4 md:px-8 select-none flex items-center justify-between relative ${isFullscreen ? 'hidden' : ''}`}>
         
+        {/* Mobile progress bar (very top of the player bar container) */}
+        <div 
+          onClick={handleSeek}
+          className="md:hidden absolute top-0 left-0 right-0 h-1 bg-white/10 cursor-pointer group z-20"
+        >
+          <div className="h-full bg-primary/20 absolute left-0 top-0" style={{ width: `${bufferedProgress}%` }} />
+          <div className="h-full bg-primary absolute left-0 top-0 transition-all duration-100" style={{ width: `${progress}%` }} />
+        </div>
+
         {/* Left: Media info */}
-        <div className="flex items-center space-x-4 min-w-0 flex-1 md:w-1/3 justify-start">
+        <div className="flex items-center space-x-3 md:space-x-4 min-w-0 flex-1 md:w-1/3 justify-start">
           <button 
              onClick={() => { setCurrentMedia(null); setIsPlaying(false); setIsPip(false); }} 
-             className="w-8 h-8 rounded-full hover:bg-white/10 items-center justify-center text-muted-foreground hover:text-white transition shrink-0"
+             className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center text-muted-foreground hover:text-white transition shrink-0"
              title="Close Player"
           >
-             <X size={20} />
+             <X size={18} />
           </button>
           {/* Always show thumbnail for reference in the bar */}
-          <div className="relative w-14 h-14 rounded-md overflow-hidden bg-secondary shrink-0 shadow-md">
+          <div className="relative w-11 h-11 md:w-14 md:h-14 rounded-md overflow-hidden bg-secondary shrink-0 shadow-md">
             {currentMedia.cover_url ? (
               <img src={currentMedia.cover_url} alt={currentMedia.title} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
-                <Music2 size={20} className="text-white" />
+                <Music2 size={16} className="text-white" />
               </div>
             )}
             {isLoading && (
               <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-20 backdrop-blur-[2px]">
-                <Loader2 size={18} className="text-white animate-spin" />
+                <Loader2 size={16} className="text-white animate-spin" />
               </div>
             )}
           </div>
 
           <div className="min-w-0 flex flex-col justify-center">
-            <p className="font-bold text-[15px] truncate hover:text-primary cursor-pointer tracking-tight leading-tight">{currentMedia.title}</p>
+            <p className="font-bold text-[13px] md:text-[15px] truncate hover:text-primary cursor-pointer tracking-tight leading-tight">{currentMedia.title}</p>
             <div className="flex items-center space-x-1.5 mt-0.5 overflow-hidden">
                <Link 
                  href={`/marketplace/stores/artist/${currentMedia.artist?.id}`}
-                 className="text-[13px] text-muted-foreground truncate hover:text-primary hover:underline transition"
+                 className="text-[11px] md:text-[13px] text-muted-foreground truncate hover:text-primary hover:underline transition"
                >
                    {currentMedia.artist?.name || currentMedia.artist?.user?.name}
                </Link>
                {currentMedia.studio && (
-                  <>
-                    <span className="w-1 h-1 rounded-full bg-muted-foreground/40 shrink-0" />
+                  <span className="hidden md:inline-flex items-center">
+                    <span className="w-1 h-1 rounded-full bg-muted-foreground/40 shrink-0 mx-1.5" />
                     <p className="text-[12px] text-primary/80 truncate font-medium">{currentMedia.studio.name} Studio</p>
-                  </>
+                  </span>
                )}
             </div>
           </div>
         </div>
 
         {/* Center: Controls & Progress */}
-        <div className="flex flex-col items-center justify-center flex-1 max-w-[722px] px-4 md:w-1/3">
-          <div className="flex items-center space-x-6 mb-2">
-            <button onClick={prevMedia} className="text-muted-foreground hover:text-white transition active:scale-90 hover:scale-105">
-              <SkipBack size={20} fill="currentColor" />
+        <div className="flex flex-col items-center justify-center flex-1 max-w-[722px] px-2 md:px-4 md:w-1/3">
+          <div className="flex items-center space-x-4 md:space-x-5 mb-1 md:mb-2">
+            {/* Shuffle Button */}
+            <button 
+              onClick={() => setShuffle(!shuffle)} 
+              className={`transition hover:scale-110 hidden sm:block ${shuffle ? 'text-primary drop-shadow-[0_0_8px_rgba(var(--primary),0.5)]' : 'text-muted-foreground hover:text-white'}`}
+              title="Shuffle"
+            >
+              <Shuffle size={16} />
+            </button>
+
+            <button onClick={handlePrev} className="text-muted-foreground hover:text-white transition active:scale-90 hover:scale-105">
+              <SkipBack size={18} className="md:w-[20px] md:h-[20px]" fill="currentColor" />
             </button>
             <button
               onClick={() => setIsPlaying(!isPlaying)}
-              className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:scale-110 transition hover:shadow-[0_0_20px_rgba(var(--primary),0.4)] shadow-lg"
+              className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:scale-110 transition hover:shadow-[0_0_20px_rgba(var(--primary),0.4)] shadow-lg"
             >
               {isPlaying
-                ? <Pause size={20} fill="currentColor" />
-                : <Play size={20} fill="currentColor" className="ml-0.5" />}
+                ? <Pause size={18} className="md:w-[20px] md:h-[20px]" fill="currentColor" />
+                : <Play size={18} className="md:w-[20px] md:h-[20px] ml-0.5" fill="currentColor" />}
             </button>
-            <button onClick={nextMedia} className="text-muted-foreground hover:text-white transition active:scale-90 hover:scale-105">
-              <SkipForward size={20} fill="currentColor" />
+            <button onClick={handleNext} className="text-muted-foreground hover:text-white transition active:scale-90 hover:scale-105">
+              <SkipForward size={18} className="md:w-[20px] md:h-[20px]" fill="currentColor" />
+            </button>
+
+            {/* Repeat Button */}
+            <button 
+              onClick={() => {
+                setRepeatMode(prev => prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off');
+              }} 
+              className={`transition hover:scale-110 relative hidden sm:block ${repeatMode !== 'off' ? 'text-primary drop-shadow-[0_0_8px_rgba(var(--primary),0.5)]' : 'text-muted-foreground hover:text-white'}`}
+              title={`Repeat: ${repeatMode}`}
+            >
+              <Repeat size={16} />
+              {repeatMode === 'one' && (
+                <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold bg-primary text-black rounded-full w-3.5 h-3.5 flex items-center justify-center scale-75">1</span>
+              )}
             </button>
           </div>
 
-          <div className="flex items-center w-full space-x-3">
+          <div className="hidden md:flex items-center w-full space-x-3">
             <span className="text-[12px] font-medium text-muted-foreground min-w-[35px] text-right tabular-nums">{fmt(currentTime)}</span>
             <div className="relative w-full h-4 flex items-center group cursor-pointer">
               <input
@@ -536,8 +1056,11 @@ export default function UnifiedMediaPlayer() {
                 onChange={handleSeekBarChange}
                 className="w-full absolute inset-0 opacity-0 cursor-pointer z-10"
               />
-              <div className="w-full h-1 bg-white/20 rounded-full pointer-events-none overflow-hidden">
-                 <div className="h-full bg-white group-hover:bg-primary transition-colors rounded-full" style={{ width: `${progress}%` }} />
+              <div className="w-full h-1 bg-white/20 rounded-full pointer-events-none overflow-hidden relative">
+                 {/* Buffered progress bar */}
+                 <div className="h-full bg-white/10 absolute left-0 top-0 transition-all rounded-full" style={{ width: `${bufferedProgress}%` }} />
+                 {/* Current playback progress bar */}
+                 <div className="h-full bg-white group-hover:bg-primary transition-colors rounded-full absolute left-0 top-0" style={{ width: `${progress}%` }} />
               </div>
               <div
                 className="absolute w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none -ml-1.5"
@@ -549,13 +1072,95 @@ export default function UnifiedMediaPlayer() {
         </div>
 
         {/* Right: Extra Controls */}
-        <div className="flex items-center space-x-5 min-w-0 flex-1 md:w-1/3 justify-end text-muted-foreground relative">
+        <div className="flex items-center space-x-3 md:space-x-5 min-w-0 flex-1 md:w-1/3 justify-end text-muted-foreground relative">
+          {/* Equalizer Toggle */}
+          <button 
+             onClick={() => setShowEQ(!showEQ)} 
+             className={`hover:text-white transition hover:scale-110 relative ${
+                showEQ ? 'text-primary drop-shadow-[0_0_8px_rgba(0,229,255,0.8)]' : eqBands.some(v => v !== 0) ? 'text-cyan-400 animate-pulse' : ''
+             }`}
+             title="Equalizer"
+          >
+             <Sliders size={16} className="md:w-[18px] md:h-[18px]" />
+          </button>
+
+          {/* Speed Selector */}
+          <div className="relative">
+            <button 
+               onClick={() => setShowSpeedMenu(!showSpeedMenu)} 
+               className="hover:text-white transition hover:scale-110 text-xs font-bold bg-white/5 px-2 py-1 rounded border border-white/10"
+               title="Playback Speed"
+            >
+               {playbackSpeed}x
+            </button>
+            {showSpeedMenu && (
+               <div className="absolute top-[100%] right-0 mt-2 bg-background/95 backdrop-blur-3xl border border-white/10 shadow-2xl z-[60] py-1 rounded-xl w-24 flex flex-col overflow-hidden animate-in slide-in-from-top-2 fade-in duration-100">
+                  {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map(speed => (
+                     <button
+                        key={speed}
+                        onClick={() => {
+                           setPlaybackSpeed(speed);
+                           setShowSpeedMenu(false);
+                        }}
+                        className={`text-left px-3 py-1.5 text-xs hover:bg-white/5 transition font-medium ${playbackSpeed === speed ? 'text-primary' : 'text-white'}`}
+                     >
+                        {speed}x
+                     </button>
+                  ))}
+               </div>
+            )}
+          </div>
+
+          {/* Sleep Timer Selector */}
+          <div className="relative">
+            <button 
+               onClick={() => setShowSleepMenu(!showSleepMenu)} 
+               className={`hover:text-white transition hover:scale-110 relative ${sleepTimeRemaining !== null ? 'text-primary' : ''}`}
+               title="Sleep Timer"
+            >
+               <Clock size={16} className="md:w-[18px] md:h-[18px]" />
+               {sleepTimeRemaining !== null && (
+                  <span className="absolute -top-2 -right-2 text-[9px] font-bold bg-primary text-black rounded-full px-1 py-0.5 scale-75 animate-pulse">
+                     {Math.ceil(sleepTimeRemaining / 60)}m
+                  </span>
+               )}
+            </button>
+            {showSleepMenu && (
+               <div className="absolute top-[100%] right-0 mt-2 bg-background/95 backdrop-blur-3xl border border-white/10 shadow-2xl z-[60] py-1 rounded-xl w-32 flex flex-col overflow-hidden animate-in slide-in-from-top-2 fade-in duration-100">
+                  <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-muted-foreground border-b border-white/5">Sleep Timer</div>
+                  {[15, 30, 45, 60].map(mins => (
+                     <button
+                        key={mins}
+                        onClick={() => {
+                           setSleepTimeRemaining(mins * 60);
+                           setShowSleepMenu(false);
+                        }}
+                        className="text-left px-3 py-1.5 text-xs hover:bg-white/5 transition text-white"
+                     >
+                        {mins} Minutes
+                     </button>
+                  ))}
+                  {sleepTimeRemaining !== null && (
+                     <button
+                        onClick={() => {
+                           setSleepTimeRemaining(null);
+                           setShowSleepMenu(false);
+                        }}
+                        className="text-left px-3 py-1.5 text-xs hover:bg-red-500/10 text-red-400 border-t border-white/5 transition"
+                     >
+                        Cancel Timer
+                     </button>
+                  )}
+               </div>
+            )}
+          </div>
+
           <button 
              onClick={() => setShowPlaylist(!showPlaylist)} 
              className={`hover:text-white transition hover:scale-110 ${showPlaylist ? 'text-primary drop-shadow-[0_0_8px_rgba(var(--primary),0.5)]' : ''}`} 
              title="Queue"
           >
-             <ListMusic size={18} />
+             <ListMusic size={16} className="md:w-[18px] md:h-[18px]" />
           </button>
           
           {isVideo && (
@@ -564,13 +1169,13 @@ export default function UnifiedMediaPlayer() {
               className={`hover:text-white transition hover:scale-110 ${isLowBandwidth ? 'text-primary' : ''}`} 
               title="Low Bandwidth (Audio Only)"
             >
-               <Zap size={18} />
+               <Zap size={16} className="md:w-[18px] md:h-[18px]" />
             </button>
           )}
 
           {isVideo && (
             <button onClick={() => setIsPip(!isPip)} className={`hover:text-white transition hidden md:block hover:scale-110 ${isPip ? 'text-primary' : ''}`} title="Miniplayer">
-               <PictureInPicture size={18} />
+               <PictureInPicture size={16} className="md:w-[18px] md:h-[18px]" />
             </button>
           )}
 
@@ -579,7 +1184,7 @@ export default function UnifiedMediaPlayer() {
                <Maximize2 size={16} />
             </button>
           )}
-          <div className="flex items-center space-x-2 group">
+          <div className="hidden md:flex items-center space-x-2 group">
             <button onClick={() => setMuted(!muted)} className="hover:text-white transition hover:scale-110">
               {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
             </button>
@@ -596,6 +1201,87 @@ export default function UnifiedMediaPlayer() {
           </div>
         </div>
       </div>
+
+      {/* ── Equalizer Panel (Overlay) ── */}
+      {showEQ && !isFullscreen && (
+         <div className="absolute top-[100%] right-4 md:right-32 w-[calc(100%-2rem)] md:w-[480px] bg-background/95 backdrop-blur-3xl border border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.6)] z-[60] flex flex-col overflow-hidden rounded-b-2xl rounded-tl-2xl mt-2 p-4 animate-in slide-in-from-top-4 fade-in duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+               <h3 className="font-bold text-sm tracking-tight flex items-center space-x-2">
+                  <Sliders size={16} className="text-primary" />
+                  <span>Equalizer</span>
+               </h3>
+               <div className="flex items-center space-x-2">
+                  <select 
+                     value={eqPreset} 
+                     onChange={(e) => applyPreset(e.target.value)}
+                     className="text-xs bg-white/5 border border-white/10 rounded-md px-2 py-1 text-white focus:outline-none focus:border-primary cursor-pointer"
+                  >
+                     <option value="Flat">Flat</option>
+                     <option value="Bass Boost">Bass Boost</option>
+                     <option value="Vocal Boost">Vocal Boost</option>
+                     <option value="Treble Boost">Treble Boost</option>
+                     <option value="Podcast">Podcast</option>
+                     <option value="Acoustic">Acoustic</option>
+                     <option value="Electronic">Electronic</option>
+                     <option value="Pop">Pop</option>
+                     <option value="Rock">Rock</option>
+                     <option value="Manual" disabled>Manual</option>
+                  </select>
+                  <button 
+                     onClick={() => applyPreset('Flat')} 
+                     className="text-xs text-muted-foreground hover:text-white transition px-2 py-1 hover:bg-white/5 rounded-md"
+                  >
+                     Reset
+                  </button>
+               </div>
+            </div>
+            {/* Sliders container */}
+            <div className="grid grid-cols-10 gap-1 h-32 items-end pt-2">
+               {eqBands.map((gain, index) => {
+                  const frequencies = ['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
+                  return (
+                     <div key={index} className="flex flex-col items-center h-full group relative">
+                        {/* Gain tooltip */}
+                        <div className="absolute -top-7 text-[9px] text-primary font-bold opacity-0 group-hover:opacity-100 transition-opacity bg-black px-1 py-0.5 rounded shadow border border-white/5 pointer-events-none z-20">
+                           {gain > 0 ? `+${gain}` : gain}dB
+                        </div>
+                        {/* Slider track */}
+                        <div className="flex-1 w-2 relative flex items-center justify-center cursor-pointer">
+                           <input
+                              type="range"
+                              min="-12"
+                              max="12"
+                              step="0.5"
+                              value={gain}
+                              onChange={(e) => handleBandChange(index, parseFloat(e.target.value))}
+                              className="absolute w-24 -rotate-90 origin-center cursor-pointer opacity-0 h-full z-10"
+                           />
+                           <div className="w-1 h-full bg-white/10 rounded-full pointer-events-none relative overflow-hidden">
+                              <div 
+                                 className="absolute w-full bg-primary rounded-full transition-all"
+                                 style={{
+                                    height: `${Math.abs(gain) / 24 * 100}%`,
+                                    bottom: gain >= 0 ? '50%' : 'auto',
+                                    top: gain < 0 ? '50%' : 'auto'
+                                 }}
+                              />
+                           </div>
+                           {/* Thumb */}
+                           <div 
+                              className="absolute w-3 h-3 bg-white rounded-full border border-primary group-hover:scale-125 transition-transform pointer-events-none"
+                              style={{
+                                 bottom: `${(gain + 12) / 24 * 100}%`,
+                                 transform: 'translateY(50%)'
+                              }}
+                           />
+                        </div>
+                        <span className="text-[9px] text-muted-foreground font-semibold mt-2 select-none">{frequencies[index]}</span>
+                     </div>
+                  );
+               })}
+            </div>
+         </div>
+      )}
 
       {/* ── Playlist/Queue Dropdown (Overlay) ── */}
       {showPlaylist && !isFullscreen && (
@@ -669,11 +1355,31 @@ export default function UnifiedMediaPlayer() {
 
       {/* ── Premium Track Purchase Prompt (Overlay) ── */}
       {showPurchasePrompt && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="relative w-full max-w-md bg-gradient-to-b from-[#0a122c] to-[#050716] p-8 rounded-[2.5rem] border border-[#00e5ff]/20 shadow-2xl shadow-[#00e5ff]/10 text-center animate-in zoom-in-95 duration-300">
+        <div 
+          onClick={() => {
+            setShowPurchasePrompt(false);
+            setIsPlaying(false);
+            if (videoRef.current) {
+              videoRef.current.currentTime = 0;
+              videoRef.current.pause();
+            }
+          }}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="relative w-full max-w-md bg-gradient-to-b from-[#0a122c] to-[#050716] p-8 rounded-[2.5rem] border border-[#00e5ff]/20 shadow-2xl shadow-[#00e5ff]/10 text-center animate-in zoom-in-95 duration-300"
+          >
             {/* Close Button */}
             <button 
-              onClick={() => setShowPurchasePrompt(false)} 
+              onClick={() => {
+                setShowPurchasePrompt(false);
+                setIsPlaying(false);
+                if (videoRef.current) {
+                  videoRef.current.currentTime = 0;
+                  videoRef.current.pause();
+                }
+              }} 
               className="absolute top-6 right-6 p-2 rounded-full hover:bg-white/5 text-muted-foreground hover:text-white transition"
             >
               <X size={20} />

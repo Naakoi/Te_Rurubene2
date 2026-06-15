@@ -11,18 +11,23 @@ use Aws\S3\S3Client;
 
 class MultipartUploadController extends Controller
 {
-    private function getS3Client()
+    private function isR2Configured(): bool
     {
-        return Storage::disk('r2')->getClient();
-    }
-
-    private function getBucket()
-    {
-        return config('filesystems.disks.r2.bucket');
+        $bucket = config('filesystems.disks.r2.bucket');
+        $key = config('filesystems.disks.r2.key');
+        return !empty($bucket) && !empty($key);
     }
 
     public function init(Request $request)
     {
+        if (!$this->isR2Configured()) {
+            return response()->json([
+                'error' => 'Cloud storage (R2) is not configured on this server.',
+                'fallback' => true,
+                'fallback_url' => '/api/studio/upload'
+            ], 503);
+        }
+
         $request->validate([
             'file_name' => 'required|string',
             'media_type' => 'required|in:audio,video,podcast_audio,podcast_video',
@@ -173,5 +178,24 @@ class MultipartUploadController extends Controller
 
             return response()->json(['message' => 'Podcast episode uploaded and processing started.', 'data' => $episode]);
         }
+    }
+
+    private function getS3Client(): S3Client
+    {
+        return new S3Client([
+            'version' => 'latest',
+            'region'  => config('filesystems.disks.r2.region', 'auto'),
+            'endpoint' => config('filesystems.disks.r2.endpoint'),
+            'use_path_style_endpoint' => config('filesystems.disks.r2.use_path_style_endpoint', true),
+            'credentials' => [
+                'key'    => config('filesystems.disks.r2.key'),
+                'secret' => config('filesystems.disks.r2.secret'),
+            ],
+        ]);
+    }
+
+    private function getBucket(): string
+    {
+        return config('filesystems.disks.r2.bucket');
     }
 }

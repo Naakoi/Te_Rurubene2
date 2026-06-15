@@ -28,21 +28,30 @@ class RevenueSplitService
             $studio = Studio::find($artist->studio_id);
         }
 
+        // Read the admin-configurable platform fee (default 10%, min 5%, max 30%)
+        $feePct      = (float) \Illuminate\Support\Facades\Cache::get('platform_fee_pct', 10);
+        $feePct      = max(5, min(30, $feePct));           // clamp for safety
+        $feeDecimal  = $feePct / 100;                       // e.g. 0.10 for 10%
+        $creatorPct  = 1 - $feeDecimal;                     // e.g. 0.90
+
         // Determine splits
-        $artistShare = 0;
-        $studioShare = 0;
-        $platformShare = $amount * 0.10; // 10% platform fee
+        $artistShare  = 0;
+        $studioShare  = 0;
+        $platformShare = $amount * $feeDecimal;
 
         if ($artist && $studio) {
-            // Studio-Managed Artist
-            $artistShare = $amount * 0.70;
-            $studioShare = $amount * 0.20;
+            // Studio-Managed Artist — creator share split 70/20 of the creator portion
+            $artistShare = $amount * ($creatorPct * 0.777778); // ~70% of total at 10% fee
+            $studioShare = $amount * ($creatorPct * 0.222222); // ~20% of total at 10% fee
+            // Recalculate precisely to avoid float drift
+            $artistShare = round($amount * (0.70 / 0.90) * $creatorPct, 2);
+            $studioShare = round($amount - $platformShare - $artistShare, 2);
         } else if ($artist) {
-            // Independent Artist
-            $artistShare = $amount * 0.90;
+            // Independent Artist gets full creator share
+            $artistShare = round($amount - $platformShare, 2);
         } else if ($studio) {
             // Studio directly
-            $studioShare = $amount * 0.90;
+            $studioShare = round($amount - $platformShare, 2);
         }
 
         $releaseAt = now()->addHours(24); // 24-hour escrow hold

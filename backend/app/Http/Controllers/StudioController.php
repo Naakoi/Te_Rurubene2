@@ -86,4 +86,74 @@ class StudioController extends Controller
             ], 201);
         }
     }
+
+    /**
+     * Upload an Album with a cover image and multiple audio files.
+     */
+    public function uploadAlbum(Request $request)
+    {
+        $user = $request->user();
+        if (!$user || !$user->artist) {
+            return response()->json(['message' => 'Unauthorized. Only verified artists can upload content.'], 403);
+        }
+
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'cover_image' => 'required|image|mimes:jpeg,png,jpg,webp|max:10240', // 10MB max
+            'tracks' => 'required|array|min:1',
+            'tracks.*.title' => 'required|string|max:255',
+            'tracks.*.file' => 'required|file|mimes:mp3,wav|max:512000', // 500MB max per song
+            'tracks.*.is_premium' => 'required|string', // validate as string/boolean from Form Data
+            'tracks.*.price' => 'nullable|numeric|min:0',
+        ]);
+
+        $artist = $user->artist;
+
+        // 1. Upload Cover Image
+        $coverUrl = null;
+        if ($request->hasFile('cover_image')) {
+            $coverPath = $request->file('cover_image')->store('covers', 'public');
+            $coverUrl = url(Storage::url($coverPath));
+        }
+
+        // 2. Create Album record
+        $album = \App\Models\Album::create([
+            'artist_id' => $artist->id,
+            'title' => $request->input('title'),
+            'cover_image' => $coverUrl,
+            'release_date' => now()->toDateString(),
+        ]);
+
+        // 3. Process and save tracks
+        $uploadedTracks = [];
+        foreach ($request->file('tracks') as $index => $trackFileGroup) {
+            $trackFile = $trackFileGroup['file'];
+            $trackData = $request->input('tracks')[$index];
+            $trackTitle = $trackData['title'];
+            $isPremium = filter_var($trackData['is_premium'], FILTER_VALIDATE_BOOLEAN);
+            $price = isset($trackData['price']) ? (float)$trackData['price'] : 0.00;
+
+            // Store file
+            $filePath = $trackFile->store('audio', 'public');
+            $fileUrl = url(Storage::url($filePath));
+
+            $track = Track::create([
+                'artist_id' => $artist->id,
+                'album_id' => $album->id,
+                'title' => $trackTitle,
+                'audio_file_path' => $fileUrl,
+                'cover_url' => $coverUrl,
+                'is_premium' => $isPremium,
+                'price' => $price,
+            ]);
+
+            $uploadedTracks[] = $track;
+        }
+
+        return response()->json([
+            'message' => 'Album and tracks uploaded successfully',
+            'album' => $album,
+            'tracks' => $uploadedTracks
+        ], 201);
+    }
 }

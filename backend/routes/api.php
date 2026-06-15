@@ -48,9 +48,15 @@ Route::get('/podcasts/episode/{id}', [\App\Http\Controllers\PodcastPublicControl
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/user/change-password', [AuthController::class, 'changePassword']);
     
-    // Route::get('/videos/stream/{id}', ...) is now public (see above)
+    // Notifications
+    Route::get('/notifications', [\App\Http\Controllers\NotificationController::class, 'index']);
+    Route::post('/notifications/read-all', [\App\Http\Controllers\NotificationController::class, 'markAllAsRead']);
+    Route::post('/notifications/{id}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead']);
+    
     Route::post('/tracks/{id}/purchase', [\App\Http\Controllers\TrackController::class, 'purchase']);
+    Route::get('/proxy-media', [\App\Http\Controllers\TrackController::class, 'proxyMedia']);
     Route::get('/my-tracks', [\App\Http\Controllers\TrackController::class, 'myTracks']);
     
     // Phase 2: Creator Economy Routes
@@ -58,9 +64,31 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/wallet/config', [\App\Http\Controllers\WalletController::class, 'getConfig']);
     Route::get('/wallet/earnings', [\App\Http\Controllers\WalletController::class, 'earnings']);
     Route::get('/wallet/library', [\App\Http\Controllers\WalletController::class, 'library']);
+    
+    // Wallet PIN Security
+    Route::get('/wallet/pin/status', [\App\Http\Controllers\WalletPinController::class, 'status']);
+    Route::post('/wallet/pin/verify', [\App\Http\Controllers\WalletPinController::class, 'verify']);
+    Route::post('/wallet/pin/set', [\App\Http\Controllers\WalletPinController::class, 'setPin']);
+    Route::post('/wallet/pin/forgot', [\App\Http\Controllers\WalletPinController::class, 'forgotPin']);
+    Route::post('/wallet/pin/reset', [\App\Http\Controllers\WalletPinController::class, 'resetPin']);
+
     Route::post('/wallet/topup/intent', [\App\Http\Controllers\WalletController::class, 'initializeTopup']);
     Route::post('/wallet/topup', [\App\Http\Controllers\WalletController::class, 'topup']); // Legacy/Deprecated
     Route::post('/wallet/redeem', [\App\Http\Controllers\RedeemCodeController::class, 'redeem']);
+
+    // ANZ Kiribati Bank Deposit
+    Route::post('/wallet/bank-deposit', [\App\Http\Controllers\BankDepositController::class, 'submit']);
+    Route::get('/wallet/bank-deposits', [\App\Http\Controllers\BankDepositController::class, 'myDeposits']);
+    
+    // Withdrawals
+    Route::get('/wallet/withdrawals', [\App\Http\Controllers\WithdrawalController::class, 'myWithdrawals']);
+    Route::post('/wallet/withdraw', [\App\Http\Controllers\WithdrawalController::class, 'request']);
+    Route::post('/wallet/withdrawals/{id}/confirm', [\App\Http\Controllers\WithdrawalController::class, 'confirm']);
+    Route::post('/wallet/transfer', [\App\Http\Controllers\WalletController::class, 'transfer']);
+    Route::get('/wallet/transfers/pending', [\App\Http\Controllers\WalletController::class, 'pendingTransfers']);
+    Route::post('/wallet/transfers/{id}/accept', [\App\Http\Controllers\WalletController::class, 'acceptTransfer']);
+    Route::post('/wallet/transfers/{id}/reject', [\App\Http\Controllers\WalletController::class, 'rejectTransfer']);
+    Route::post('/wallet/transfers/{id}/cancel', [\App\Http\Controllers\WalletController::class, 'cancelTransfer']);
     
     // Secure Webhook Simulation (Public but Signed)
     Route::get('/webhooks/payment/simulate', [\App\Http\Controllers\WalletController::class, 'confirmSimulation'])
@@ -104,6 +132,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/users', [\App\Http\Controllers\AdminController::class, 'listUsers']);
         Route::delete('/admin/users/{id}', [\App\Http\Controllers\AdminController::class, 'deleteUser']);
         Route::post('/admin/users/{id}/reset-password', [\App\Http\Controllers\AdminController::class, 'resetUserPassword']);
+        Route::get('/admin/users/{id}/transactions', [\App\Http\Controllers\AdminController::class, 'userTransactions']);
+        Route::post('/admin/users/{id}/adjust-wallet', [\App\Http\Controllers\AdminController::class, 'adjustUserWallet']);
         
         Route::get('/admin/artists', [\App\Http\Controllers\AdminController::class, 'listArtists']);
         Route::post('/admin/artists/{id}/verify', [\App\Http\Controllers\AdminController::class, 'verifyArtist']);
@@ -119,6 +149,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/redeem-codes', [\App\Http\Controllers\RedeemCodeController::class, 'index']);
         Route::post('/admin/redeem-codes', [\App\Http\Controllers\RedeemCodeController::class, 'store']);
         Route::delete('/admin/redeem-codes/{id}', [\App\Http\Controllers\RedeemCodeController::class, 'destroy']);
+
+        // Admin Bank Deposit Management
+        Route::get('/admin/bank-deposits', [\App\Http\Controllers\AdminController::class, 'listBankDeposits']);
+        Route::post('/admin/bank-deposits/{id}/approve', [\App\Http\Controllers\AdminController::class, 'approveBankDeposit']);
+        Route::post('/admin/bank-deposits/{id}/reject', [\App\Http\Controllers\AdminController::class, 'rejectBankDeposit']);
+
+        // Admin Withdrawal Management
+        Route::get('/admin/withdrawals', [\App\Http\Controllers\WithdrawalController::class, 'adminList']);
+        Route::post('/admin/withdrawals/{id}/approve', [\App\Http\Controllers\WithdrawalController::class, 'approve']);
+        Route::post('/admin/withdrawals/{id}/reject', [\App\Http\Controllers\WithdrawalController::class, 'reject']);
+
+        // System Ledger & Treasury
+        Route::get('/admin/ledger', [\App\Http\Controllers\AdminController::class, 'systemLedger']);
+        Route::get('/admin/ledger/transactions', [\App\Http\Controllers\AdminController::class, 'systemTransactions']);
+        Route::get('/admin/revenue-transactions', [\App\Http\Controllers\AdminController::class, 'revenueTransactions']);
     });
 
     Route::middleware('role:studio')->group(function () {
@@ -136,6 +181,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/artist/analytics', [\App\Http\Controllers\AnalyticsController::class, 'artistDashboard']);
         Route::post('/videos/upload', [\App\Http\Controllers\ContentController::class, 'uploadVideo']);
         Route::post('/studio/upload', [\App\Http\Controllers\StudioController::class, 'upload']); // Keep old for fallback
+        Route::post('/studio/upload-album', [\App\Http\Controllers\StudioController::class, 'uploadAlbum']);
 
         // New Direct-to-Cloud Upload Routes
         Route::post('/upload/multipart/init', [\App\Http\Controllers\MultipartUploadController::class, 'init']);

@@ -9,7 +9,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use ProtoneMedia\LaravelFFMpeg\Support\FFMpeg;
-use FFMpeg\Format\Audio\Aac;
+use App\FFMpeg\NativeAac;
 
 class ProcessAudioUpload implements ShouldQueue
 {
@@ -26,9 +26,9 @@ class ProcessAudioUpload implements ShouldQueue
 
     public function handle(): void
     {
-        $lowBitrate = (new Aac)->setAudioKiloBitrate(64);
-        $midBitrate = (new Aac)->setAudioKiloBitrate(128);
-        $highBitrate = (new Aac)->setAudioKiloBitrate(320);
+        $lowBitrate  = (new NativeAac)->setAudioKiloBitrate(64);
+        $midBitrate  = (new NativeAac)->setAudioKiloBitrate(128);
+        $highBitrate = (new NativeAac)->setAudioKiloBitrate(320);
 
         FFMpeg::fromDisk('r2')
             ->open($this->r2Key)

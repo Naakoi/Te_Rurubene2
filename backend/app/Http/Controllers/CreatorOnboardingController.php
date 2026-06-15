@@ -26,6 +26,7 @@ class CreatorOnboardingController extends Controller
             'password' => 'required|string|min:8|confirmed',
             'country' => 'required|string',
             'island' => 'required|string',
+            'wallet_pin' => 'required|string|size:4|regex:/^[0-9]+$/',
         ]);
 
         // In production, we'd send an OTP here and verify it in a separate step.
@@ -39,6 +40,7 @@ class CreatorOnboardingController extends Controller
                 'password' => Hash::make($request->password),
                 'role' => 'client', // Starts as client, upgraded later
                 'email_verified_at' => now(), // Simulated OTP success
+                'wallet_pin' => Hash::make($request->wallet_pin),
             ]);
 
             Profile::create([

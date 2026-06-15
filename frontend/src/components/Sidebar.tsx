@@ -7,15 +7,23 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import api from "@/lib/axios";
 
+import { useCartStore } from "@/store/cartStore";
+import { usePlayerStore } from "@/store/playerStore";
+
 export default function Sidebar() {
   const { user, setUser } = useAuthStore();
   const { isSidebarOpen, closeSidebar } = useUIStore();
+  const clearCart = useCartStore((state) => state.clearCart);
+  const clearQueue = usePlayerStore((state) => state.clearQueue);
   const router = useRouter();
   const pathname = usePathname();
 
   const handleLogout = () => {
     api.post('/api/logout').finally(() => {
         localStorage.removeItem('token');
+        localStorage.removeItem('auth_token');
+        clearCart();
+        clearQueue();
         setUser(null);
         router.push('/login');
     });
@@ -64,11 +72,15 @@ export default function Sidebar() {
         <nav className="space-y-1">
           <NavLink href="/" icon={<Home size={20} />} label="Home" />
           <NavLink href="/discover" icon={<Compass size={20} />} label="Discover" />
-          <NavLink href="/discover/podcasts" icon={<Mic size={18} />} label="Podcasts" isSub />
-          <NavLink href="/marketplace" icon={<ShoppingBag size={20} />} label="Marketplace" />
-          <NavLink href="/marketplace/stores" icon={<Store size={18} />} label="Public Stores" isSub />
-          <NavLink href="/library" icon={<Library size={20} />} label="Library" />
-          <NavLink href="/wallet" icon={<Wallet size={20} />} label="Wallet" />
+          {user && (
+            <>
+              <NavLink href="/discover/podcasts" icon={<Mic size={18} />} label="Podcasts" isSub />
+              <NavLink href="/marketplace" icon={<ShoppingBag size={20} />} label="Marketplace" />
+              <NavLink href="/marketplace/stores" icon={<Store size={18} />} label="Public Stores" isSub />
+              <NavLink href="/library" icon={<Library size={20} />} label="Library" />
+              <NavLink href="/wallet" icon={<Wallet size={20} />} label="Wallet" />
+            </>
+          )}
           
           {(user?.role === 'admin' || user?.role === 'artist' || user?.role === 'studio') && (
             <div className="pt-6 pb-2 px-4">
